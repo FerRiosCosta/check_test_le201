@@ -1,11 +1,21 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
+	"io/ioutil"
+	"log"
+	"net/http"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
+
+	jwt "github.com/dgrijalva/jwt-go"
 )
+
+var mySigningKey = []byte("examjwt123")
 
 func fileExists(filename string) bool {
 	info, err := os.Stat(filename)
@@ -31,7 +41,7 @@ func runCommand(params string) string {
 
 }
 
-func check_run() {
+func check_run() int {
 
 	runCommand("sudo mkdir -p /var/log/.test")
 
@@ -40,6 +50,7 @@ func check_run() {
 
 		runCommand("sudo rm -f /var/log/.test/try1.lock")
 		runCommand("sudo touch /var/log/.test/try2.lock")
+		return 2
 
 	} else if fileExists("/var/log/.test/try2.lock") {
 		fmt.Println("Ya no puede ejecutar la correccion de su examen.")
@@ -48,8 +59,9 @@ func check_run() {
 	} else {
 		fmt.Println("Ejecutando por primera vez la correcion, le queda un intento mas de correccion.")
 		runCommand("sudo touch /var/log/.test/try1.lock")
+		return 1
 	}
-
+	return 0
 }
 
 func check_service(points int) int {
@@ -60,19 +72,11 @@ func check_service(points int) int {
 	stdout1 := runCommand("sudo systemctl is-active firewalld")
 	stdout2 := runCommand("sudo systemctl is-enabled firewalld")
 	if stdout1 == "inactive" && stdout2 == "disabled" {
-		total = total + points/2
-		fmt.Printf("\tFirewalld bien configurado: %d puntos\n", points/2)
+		total = total + points
+		fmt.Printf("\tFirewalld bien configurado: %d puntos\n", points)
 
 	} else {
 		fmt.Printf("\tFirewalld no fue configurado: %d puntos\n", 0)
-	}
-	stdout1 = runCommand("sudo systemctl is-active chronyd")
-	stdout2 = runCommand("sudo systemctl is-enabled chronyd")
-	if stdout1 == "inactive" && stdout2 == "disabled" {
-		total = total + points/2
-		fmt.Printf("\tChronyd bien configurado: %d puntos\n", points/2)
-	} else {
-		fmt.Printf("\tChronyd no fue configurado: %d puntos\n", 0)
 	}
 
 	return total
@@ -84,8 +88,8 @@ func check_swap(points int) int {
 	fmt.Println("")
 	stdout1 := runCommand("sudo swapon -s | grep /dev/sda3 | awk '{ print $3 }'")
 	if stdout1 != "" && stdout1 == "1048572" {
-		total += points / 2
-		fmt.Printf("\tSWAP ampliado y activado: %d puntos\n", points/2)
+		total += points
+		fmt.Printf("\tSWAP ampliado y activado: %d puntos\n", points)
 	} else {
 		fmt.Printf("\tSWAP no fue ampliado o activado: %d puntos\n", 0)
 	}
@@ -333,8 +337,8 @@ func check_raid(points int) int {
 		// md0 raid level
 		stdout_raidlevel := runCommand("cat /proc/mdstat | grep md0 | awk '{ print $4 }'")
 		if stdout_raidlevel == "raid1" {
-			total += points / 5
-			fmt.Printf("\t/dev/md0 fue configurado con el raid correcto: %d puntos\n", points/5)
+			total += points / 6
+			fmt.Printf("\t/dev/md0 fue configurado con el raid correcto: %d puntos\n", points/6)
 		} else {
 			fmt.Printf("\t/dev/md0 no fue configurado con el raid correcto: %d puntos\n", 0)
 		}
@@ -346,8 +350,8 @@ func check_raid(points int) int {
 			raid_fs := strings.Fields(stdout_mounted)[1]
 			raid_mount := strings.Fields(stdout_mounted)[6]
 			if raid_name == "/dev/md0" && raid_fs == "xfs" && raid_mount == "/raid/contab" {
-				total += points / 5
-				fmt.Printf("\t/dev/md0 fue configurado con el punto de montaje correcto: %d puntos\n", points/5)
+				total += points / 6
+				fmt.Printf("\t/dev/md0 fue configurado con el punto de montaje correcto: %d puntos\n", points/6)
 			} else {
 				fmt.Printf("\t/dev/md0 no fue configurado con el punto de montaje correcto: %d puntos\n", 0)
 			}
@@ -360,8 +364,8 @@ func check_raid(points int) int {
 		if stdout_fstab != "" {
 			raid_uuid := strings.Fields(stdout_fstab)[0]
 			if strings.HasPrefix(raid_uuid, "UUID=") {
-				total += points / 5
-				fmt.Printf("\t/dev/md0 fue configurado persistentemente con su UUID: %d puntos\n", points/5)
+				total += points / 6
+				fmt.Printf("\t/dev/md0 fue configurado persistentemente con su UUID: %d puntos\n", points/6)
 			} else {
 				fmt.Printf("\t/dev/md0 NO fue configurado persistentemente con su UUID de forma correcta: %d puntos\n", 0)
 			}
@@ -372,8 +376,8 @@ func check_raid(points int) int {
 		// md1 raid level
 		stdout_raidlevel = runCommand("cat /proc/mdstat | grep md1 | awk '{ print $4 }'")
 		if stdout_raidlevel == "raid5" {
-			total += points / 5
-			fmt.Printf("\t/dev/md1 fue configurado con el raid correcto: %d puntos\n", points/5)
+			total += points / 6
+			fmt.Printf("\t/dev/md1 fue configurado con el raid correcto: %d puntos\n", points/6)
 		} else {
 			fmt.Printf("\t/dev/md1 no fue configurado con el raid correcto: %d puntos\n", 0)
 		}
@@ -385,8 +389,8 @@ func check_raid(points int) int {
 			raid_fs := strings.Fields(stdout_mounted)[1]
 			raid_mount := strings.Fields(stdout_mounted)[6]
 			if raid_name == "/dev/md1" && raid_fs == "xfs" && raid_mount == "/raid/nagios" {
-				total += points / 5
-				fmt.Printf("\t/dev/md1 fue configurado con el punto de montaje correcto: %d puntos\n", points/5)
+				total += points / 6
+				fmt.Printf("\t/dev/md1 fue configurado con el punto de montaje correcto: %d puntos\n", points/6)
 			} else {
 				fmt.Printf("\t/dev/md1 no fue configurado con el punto de montaje correcto: %d puntos\n", 0)
 			}
@@ -399,8 +403,8 @@ func check_raid(points int) int {
 		if stdout_fstab != "" {
 			raid_uuid := strings.Fields(stdout_fstab)[0]
 			if strings.HasPrefix(raid_uuid, "UUID=") {
-				total += points / 5
-				fmt.Printf("\t/dev/md1 fue configurado persistentemente con su UUID: %d puntos\n", points/5)
+				total += points / 6
+				fmt.Printf("\t/dev/md1 fue configurado persistentemente con su UUID: %d puntos\n", points/6)
 			} else {
 				fmt.Printf("\t/dev/md1 NO fue configurado persistentemente con su UUID de forma correcta: %d puntos\n", 0)
 			}
@@ -415,27 +419,124 @@ func check_raid(points int) int {
 	return total
 }
 
+func GenerateJWT() (string, error) {
+	token := jwt.New(jwt.SigningMethodHS256)
+
+	//claims := token.Claims.(jwt.MapClaims)
+
+	//claims["authorized"] = true
+	//claims["client"] = "Elliot Forbes"
+	//claims["exp"] = time.Now().Add(time.Minute * 30).Unix()
+
+	tokenString, err := token.SignedString(mySigningKey)
+
+	if err != nil {
+		fmt.Printf("Something Went Wrong: %s", err.Error())
+		return "", err
+	}
+
+	return tokenString, nil
+}
+
+func post(try int, score int, student string) {
+	validToken, err := GenerateJWT()
+	if err != nil {
+		fmt.Println("Failed to generate token")
+	}
+
+	fmt.Println("Enviando resultado al cloud")
+	todo := Todo{strconv.Itoa(try), strconv.Itoa(score), student}
+
+	jsonReq, err := json.Marshal(todo)
+
+	client := &http.Client{}
+	req, _ := http.NewRequest("POST", "http://ferztyle.rocks:8080/api/exam", bytes.NewBuffer(jsonReq))
+	fmt.Println(validToken)
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", validToken))
+
+	res, err := client.Do(req)
+	if err != nil {
+		fmt.Printf("Error: %s", err.Error())
+	}
+
+	body, err := ioutil.ReadAll(res.Body)
+	if err != nil {
+		fmt.Println(err)
+	}
+	fmt.Printf(string(body))
+}
+
+// Todo struct
+type Todo struct {
+	Try     string `json:"try"`
+	Score   string `json:"score"`
+	Student string `json:"student"`
+}
+
+func read_student_name() string {
+	if fileExists("/etc/student") {
+		name := runCommand("sudo cat /etc/student | tr -d '\n'")
+		if name == "" {
+			fmt.Printf("\n\n##### DEBE COMPLETAR PRIMERO EL ARCHIVO /etc/student CON SU NOMBRE Y APELLIDO #####\n\n")
+			log.Fatal()
+		} else {
+			return name
+		}
+	} else {
+		fmt.Printf("\n\n##### DEBE COMPLETAR PRIMERO EL ARCHIVO /etc/student CON SU NOMBRE Y APELLIDO #####\n\n")
+		log.Fatal()
+	}
+	return ""
+}
+
 func main() {
 
-	//check_run()
+	student := read_student_name()
+
+	try := check_run()
+	// 1- root password recovered
 	fmt.Println("### Ejercicio 1 ###")
 	fmt.Println("")
-	total := 10
-	fmt.Printf("\tPassword root recuperado: %d puntos\n", total)
+	total := 2
+	fmt.Printf("\tPassword root recuperado: %d puntos\n\n", total)
+	// 2- Services: Stopping and disabling
+	total += check_service(5)
 	fmt.Println("")
-	total += check_service(10)
-	total += check_swap(10)
-	total += check_raid(10)
+	// 3- Increase Swap area
+	total += check_swap(5)
+	fmt.Println("")
+	// 4- Configure Raid
+	total += check_raid(24)
+	fmt.Println("")
+	// 5- Kernel Params settings
 	total += check_kernel_params(10)
-	total += check_groups(10)
+	fmt.Println("")
+	// 6- Add Groups
+	total += check_groups(5)
+	fmt.Println("")
+	// 7- Add users
 	total += check_users(10)
-	total += check_account(10)
+	fmt.Println("")
+	// 8- User password policies
+	total += check_account(5)
+	fmt.Println("")
+	// 9- Directories permissions
 	total += check_permissions(10)
+	fmt.Println("")
+	// 10- Publish local repo via apache
 	total += check_httprepo(10)
-	total += check_localrepo(10)
-	total += check_disablerepo(10)
-	total += check_initramfs(10)
+	fmt.Println("")
+	// 11- Set Local repo
+	total += check_localrepo(5)
+	fmt.Println("")
+	// 12- Disable repo
+	total += check_disablerepo(5)
+	fmt.Println("")
+	// 13- Recreate initramfs
+	total += check_initramfs(4)
+	fmt.Println("")
+	// Total
+	fmt.Printf("Total obtenido: %d\n\n", total)
 
-	fmt.Printf("total: %d", total)
-
+	post(try, total, student)
 }
