@@ -451,7 +451,6 @@ func post(try int, score int, student string) {
 
 	client := &http.Client{}
 	req, _ := http.NewRequest("POST", "http://ferztyle.rocks:8080/api/exam", bytes.NewBuffer(jsonReq))
-	fmt.Println(validToken)
 	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", validToken))
 
 	res, err := client.Do(req)
